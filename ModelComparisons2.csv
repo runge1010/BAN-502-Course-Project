@@ -1,0 +1,17 @@
+Model Type,Data Type,Accuracy,Sensitivity,Specificity
+Classification Tree,Training,87%,46%,98%
+Classification Tree,Testing,87%,43%,98%
+Ensemble,Training,91%,58%,99%
+Ensemble,Testing,87%,44%,98%
+Neural Network,Training,89%,51%,98%
+Neural Network,Testing,87%,44%,98%
+Random Forrest,Training,49%,16%,58%
+Random Forrest,Testing,50%,18%,58%
+Random Forrest with Tuning,Training,66%,8%,80%
+Random Forrest with Tuning,Testing,66%,11%,80%
+Stacked,Training,91%,58%,99%
+Stacked,Testing,87%,44%,98%
+Stepwise (Back),Training,76%,74%,76%
+Stepwise (Back),Testing,74%,70%,75%
+XgBoost,Training,89%,92%,89%
+XgBoost,Testing,87%,84%,87%

@@ -1,0 +1,9 @@
+Model Type,Accuracy,Naive Model,Sensitivity,Specificity
+Classification Tree,87%,80%,43%,98%
+Stepwise (Back),74%,80%,70%,75%
+Random Forrest,50%,80%,18%,58%
+Random Forrest with Tuning,66%,80%,11%,80%
+Neural Network,87%,80%,44%,98%
+Ensemble,87%,80%,44%,98%
+Stacked,87%,80%,44%,98%
+XgBoost,87%,80%,84%,87%

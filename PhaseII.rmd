@@ -1,0 +1,651 @@
+---
+output:
+  word_document: default
+  html_document: default
+---
+# BAN 502 - Course Project
+## Phase 2
+### Runge, Laura
+  
+***
+  
+```{r, warning=FALSE, message=FALSE}
+library(rattle)
+library(rpart)
+library(RColorBrewer)
+library(tidyverse)
+library(lubridate)
+library(VIM)
+library(gridExtra)
+library(GGally)
+library(MASS)
+library(car)
+library(ranger)
+library(mice)
+library(caret)
+library(forcats)
+library(rcompanion)
+library(nnet)
+library(caretEnsemble)
+library(xgboost)
+library(ROCR)
+
+```
+  
+***
+  
+**CLEANING DATA**
+  
+Load Dataset
+  
+```{r, warning=FALSE, message=FALSE}
+chicago <- read_csv("chicago.csv")
+```
+  
+Select Variables of Interest  
+Mutate Variables to categorized factors  
+  
+
+```{r}
+chicago2=chicago  %>%
+  dplyr::select(-c("ID", "Block", "Description", "IUCR","Case Number","Updated On", "X Coordinate","Y Coordinate","Location", "FBI Code","Year","X1", "Beat", "Ward", "Community Area")) %>%
+  mutate(Date = mdy_hm(Date)) %>%
+  mutate(Hour = hour(Date)) %>%
+  mutate(DayofWeek = wday(Date)) %>%
+  mutate(Hour=as.factor(Hour))
+
+
+chicago2$`Primary Type`=as.factor(chicago2$`Primary Type`)
+chicago2$District=as.factor(chicago2$District)
+
+
+chicago2 = chicago2 %>% mutate(Arrest = as.factor(Arrest)) %>% 
+  mutate(Arrest = fct_recode(Arrest, "No" = "FALSE", "Yes" = "TRUE" ))
+
+chicago2 = chicago2 %>% mutate(Domestic = as.factor(Domestic)) %>% 
+  mutate(Domestic = fct_recode(Domestic, "No" = "FALSE", "Yes" = "TRUE" ))
+
+chicago2 = chicago2 %>% mutate(DayofWeek= as.factor(DayofWeek)) %>% 
+  mutate(DayofWeek = fct_recode(DayofWeek, "Sunday" = "1", "Monday" = "2", "Tuesday"="3", "Wednesday"="4", "Thursday"="5", "Friday"="6", "Saturday"="7" ))
+
+```
+  
+Remove missing observations  
+  
+```{r}
+chicago2=chicago2 %>%
+  dplyr::select(-c("Latitude","Longitude","Date")) %>%
+  drop_na()
+```
+  
+Consolidate factor levels  
+  
+Location Description:  
+  
+```{r}
+chicago2$`Location Description` = fct_collapse(chicago2$`Location Description`, 
+      "Airport" = c("AIRCRAFT","AIRPORT BUILDING NON-TERMINAL - NON-SECURE AREA","AIRPORT BUILDING NON-TERMINAL - SECURE AREA","AIRPORT EXTERIOR - NON-SECURE AREA","AIRPORT EXTERIOR - SECURE AREA","AIRPORT PARKING LOT","AIRPORT TERMINAL LOWER LEVEL - NON-SECURE AREA","AIRPORT TERMINAL LOWER LEVEL - SECURE AREA","AIRPORT TERMINAL UPPER LEVEL - NON-SECURE AREA","AIRPORT TERMINAL UPPER LEVEL - SECURE AREA","AIRPORT TRANSPORTATION SYSTEM (ATS)","AIRPORT VENDING ESTABLISHMENT"), 
+      "Business/Retail/Resturant"=c("APPLIANCE STORE","ATHLETIC CLUB","AUTO / BOAT / RV DEALERSHIP","BAR OR TAVERN","BARBERSHOP","BOWLING ALLEY","CAR WASH","CLEANING STORE","COMMERCIAL / BUSINESS OFFICE","CONVENIENCE STORE","DEPARTMENT STORE","DRUG STORE","GAS STATION","GROCERY FOOD STORE","MOVIE HOUSE/THEATER","PAWN SHOP","RESTAURANT","SMALL RETAIL STORE","TAVERN/LIQUOR STORE","FACTORY/MANUFACTURING BUILDING","WAREHOUSE","ATM (AUTOMATIC TELLER MACHINE)","BANK","CURRENCY EXCHANGE","SAVINGS AND LOAN","HOTEL","HOTEL/MOTEL"), 
+      "Government Building/Land"=c("FEDERAL BUILDING","FIRE STATION","GOVERNMENT BUILDING","GOVERNMENT BUILDING/PROPERTY","LIBRARY","FOREST PRESERVE","LAKEFRONT/WATERFRONT/RIVERBANK","PARK PROPERTY","JAIL / LOCK-UP FACILITY","POLICE FACILITY/VEH PARKING LOT"), 
+      "Medical/Hospital"=c("ANIMAL HOSPITAL","HOSPITAL BUILDING/GROUNDS","MEDICAL/DENTAL OFFICE","NURSING HOME/RETIREMENT HOME"),
+      "Other"=c("CEMETARY","CONSTRUCTION SITE","OTHER","POOL ROOM","SPORTS ARENA/STADIUM","ABANDONED BUILDING","VACANT LOT", "VACANT LOT/LAND","CHURCH/SYNAGOGUE/PLACE OF WORSHIP"),
+      "Public Transportation"=c("CTA BUS","CTA BUS STOP","CTA GARAGE / OTHER PROPERTY","CTA PLATFORM","CTA STATION","CTA TRAIN","OTHER COMMERCIAL TRANSPORTATION","OTHER RAILROAD PROP / TRAIN DEPOT"),
+      "Residential"=c("APARTMENT","CHA APARTMENT","CHA HALLWAY/STAIRWELL/ELEVATOR","CHA PARKING LOT/GROUNDS","DRIVEWAY - RESIDENTIAL","HALLWAY","HOUSE","PORCH","RESIDENCE","RESIDENCE PORCH/HALLWAY","RESIDENCE-GARAGE","RESIDENTIAL YARD (FRONT/BACK)","YARD"),
+      "School/College"=c("COLLEGE/UNIVERSITY GROUNDS","COLLEGE/UNIVERSITY RESIDENCE HALL","DAY CARE CENTER","SCHOOL, PRIVATE, BUILDING","SCHOOL, PRIVATE, GROUNDS","SCHOOL, PUBLIC, BUILDING","SCHOOL, PUBLIC, GROUNDS"),
+      "Street"=c("ALLEY","BRIDGE","HIGHWAY/EXPRESSWAY","PARKING LOT","PARKING LOT/GARAGE(NON.RESID.)","SIDEWALK","STREET"),
+      "Vehicle/Boat"=c("TAXICAB","VEHICLE - DELIVERY TRUCK","VEHICLE - OTHER RIDE SHARE SERVICE (E.G., UBER, LYFT)","VEHICLE NON-COMMERCIAL","VEHICLE-COMMERCIAL","VEHICLE-COMMERCIAL - ENTERTAINMENT/PARTY BUS","AUTO","BOAT/WATERCRAFT"))
+```
+  
+Primary Type:  
+  
+```{r}
+chicago2$`Primary Type` = fct_collapse(chicago2$`Primary Type`,
+      "Assault"="ASSAULT",
+      "Battery"="BATTERY",
+      "Burglary"="BURGLARY",
+      "Damage"="CRIMINAL DAMAGE",
+      "Disturbing the Peace"=c("PUBLIC PEACE VIOLATION","INTERFERENCE WITH PUBLIC OFFICER","OBSCENITY","INTIMIDATION"),
+      "Drugs/Alcohol"=c("NARCOTICS","LIQUOR LAW VIOLATION"),
+      "Fraud"="DECEPTIVE PRACTICE",
+      "Homicide"="HOMICIDE",
+      "Other"=c("KIDNAPPING","OTHER OFFENSE","ARSON","STALKING","OFFENSE INVOLVING CHILDREN","GAMBLING","NON-CRIMINAL"),
+      "Robbery"="ROBBERY",
+      "Sexual"=c("SEX OFFENSE","CRIM SEXUAL ASSAULT","PROSTITUTION","PUBLIC INDECENCY"),
+      "Theft"="THEFT",
+      "Auto Theft"="MOTOR VEHICLE THEFT",
+      "Trespass"="CRIMINAL TRESPASS",
+      "Weapons"=c("WEAPONS VIOLATION","CONCEALED CARRY LICENSE VIOLATION"))
+
+#summary(chicago2)
+str(chicago2)
+```
+  
+***
+
+**Training Sets** 
+  
+```{r}
+set.seed(1234) 
+train.rows = createDataPartition(y = chicago2$Arrest, p=0.7, list = FALSE)
+train = dplyr::slice(chicago2,train.rows)
+test = dplyr::slice(chicago2,-train.rows)
+
+```
+  
+***
+  
+**Classification Tree**
+  
+```{r}
+tree1 = rpart(Arrest  ~., train, method="class")
+fancyRpartPlot(tree1)
+
+```
+
+```{r}
+printcp(tree1)
+plotcp(tree1)
+```
+
+```{r}
+treepred = predict(tree1, train, type = "class")
+head(treepred)
+
+confusionMatrix(treepred,train$Arrest,positive="Yes")
+
+```
+
+```{r}
+treepred_test = predict(tree1, newdata=test, type = "class")
+head(treepred_test)
+
+confusionMatrix(treepred_test,test$Arrest,positive="Yes")
+```
+  
+***
+  
+**Stepwise Regression**  
+  
+```{r}
+allmod = glm(Arrest ~., train, family = "binomial") 
+#summary(allmod)  
+
+```
+  
+```{r}
+emptymod = glm(Arrest~1, train, family = "binomial")  
+#summary(emptymod)
+
+```
+  
+```{r}
+backmod = stepAIC(allmod, direction = "backward", trace = TRUE) 
+
+#summary(backmod)
+```
+  
+```{r}
+pred_back = predict(backmod,train,type="response")
+head(pred_back)
+
+```
+
+```{r}
+ROCRpred = prediction(pred_back, train$Arrest)
+ROCRperf = performance(ROCRpred, "tpr", "fpr")
+plot(ROCRperf, colorize=TRUE, print.cutoffs.at=seq(0,1,by=0.1), text.adj=c(-0.2,1.7))
+
+
+as.numeric(performance(ROCRpred, "auc")@y.values)
+
+opt.cut = function(perf, pred){
+    cut.ind = mapply(FUN=function(x, y, p){
+        d = (x - 0)^2 + (y-1)^2
+        ind = which(d == min(d))
+        c(sensitivity = y[[ind]], specificity = 1-x[[ind]], 
+            cutoff = p[[ind]])
+    }, perf@x.values, perf@y.values, pred@cutoffs)
+}
+
+print(opt.cut(ROCRperf, ROCRpred))
+
+```
+  
+```{r}
+t1 = table(train$Arrest,pred_back > 0.1694621)
+t1
+
+(t1[1,1]+t1[2,2])/nrow(train)
+
+(t1[2,2]/(t1[2,1]+t1[2,2]))
+
+(t1[1,1]/(t1[1,1]+t1[1,2]))
+
+```
+
+```{r}
+pred_back_test = predict(backmod,test,type="response")
+head(pred_back_test)
+```
+
+```{r}
+t2 = table(test$Arrest,pred_back_test > 0.1694621)
+t2
+
+(t2[1,1]+t2[2,2])/nrow(test)
+
+(t2[2,2]/(t2[2,1]+t2[2,2]))
+
+(t2[1,1]/(t2[1,1]+t2[1,2]))
+
+```
+
+
+***
+  
+**Random Forrest**  
+  
+```{r}
+# fit_control = trainControl(method = "cv", number = 10)
+# 
+# set.seed(1234)
+# rf_fit1 = train(x=as.matrix(train[,-3]), y=as.matrix(train$Arrest),    
+#                  method = "ranger",  
+#                  importance = "permutation",
+#                  trControl = fit_control)
+```
+  
+```{r}
+# saveRDS(rf_fit1, "rf_fit1.rds")
+# rm(rf_fit1)
+```
+  
+```{r}
+rf_fit1 = readRDS("rf_fit1.rds")
+rf_fit1
+
+varImp(rf_fit1)
+```
+  
+```{r}
+pred_rf1 = predict.train(rf_fit1, train)
+head(pred_rf1)
+
+confusionMatrix(pred_rf1,train$Arrest,positive="Yes")
+```
+  
+```{r}
+pred_rf_test1 = predict.train(rf_fit1, test)
+head(pred_rf_test1)
+
+confusionMatrix(pred_rf_test1, test$Arrest, positive = "Yes")
+```
+  
+**Random Forrest with mtry/Hellinger tuning**
+  
+```{r}
+# fit_control = trainControl(method = "cv", number = 10)
+# 
+# tunegrid = expand.grid(mtry = 1, splitrule ="hellinger", min.node.size=1)
+#  
+# set.seed(1234)
+# rf_fit = train(x=as.matrix(train[,-3]), y=as.matrix(train$Arrest),    
+#                  method = "ranger",  
+#                  importance = "permutation",
+#                  tuneGrid = tunegrid,
+#                  trControl = fit_control)
+
+```
+  
+```{r}
+# saveRDS(rf_fit, "rf_fit.rds")
+# rm(rf_fit)
+```
+
+```{R}
+rf_fit = readRDS("rf_fit.rds")
+rf_fit
+
+varImp(rf_fit)
+```
+
+```{r}
+pred_rf = predict.train(rf_fit, train)
+head(pred_rf)
+
+confusionMatrix(pred_rf,train$Arrest,positive="Yes")
+```
+  
+```{r}
+pred_rf_test = predict.train(rf_fit, test)
+head(pred_rf_test)
+
+confusionMatrix(pred_rf_test, test$Arrest, positive = "Yes")
+
+```
+  
+***
+  
+**Neural Network**
+  
+```{r}
+# fitControl = trainControl(method = "cv", number = 5)
+#   
+# nnetGrid =  expand.grid(size = 1:13, decay = c(0.5, 0.1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7))
+#  
+# set.seed(1234)
+# nnetFit = train(x=train[,-3],y=train$Arrest, 
+#                   method = "nnet",
+#                   trControl = fitControl,
+#                   tuneGrid = nnetGrid,
+#                   verbose = FALSE,
+#                   trace = FALSE)
+
+```
+
+```{r}
+# saveRDS(nnetFit, "nnetFit.rds")
+# rm(nnetFit)
+```
+  
+```{r}
+nnetFit = readRDS("nnetFit.rds")
+#nnetFit
+```
+  
+```{r}
+prednnet = predict(nnetFit, train)
+head(prednnet)
+
+confusionMatrix(prednnet, train$Arrest, positive = "Yes")
+```
+  
+```{r}
+prednnet_test = predict(nnetFit, test)
+head(prednnet_test)
+
+confusionMatrix(prednnet_test, test$Arrest, positive = "Yes")
+```
+  
+***
+  
+**Ensemble**  
+  
+```{r}
+control = trainControl(
+  method = "cv",
+  number = 5,
+  savePredictions = "final",
+  classProbs = TRUE,
+  summaryFunction = twoClassSummary,
+  index=createResample(train$Arrest))
+
+```
+
+```{r}
+# set.seed(1234)
+# model_list = caretList(x=as.data.frame(train[,-3]), y=train$Arrest,
+# metric = "ROC",
+# trControl= control,
+# methodList=c("glm","rpart","ranger"),
+# tuneList=list(
+#          nn = caretModelSpec(method="nnet", tuneGrid =
+#          expand.grid(size = 1:80,
+#          decay = c(0.5, 0.1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7)),trace=FALSE)))
+
+```
+
+```{r}
+# saveRDS(model_list,"model_list.rds")
+# rm(model_list)
+
+```
+  
+```{r}
+model_list = readRDS("model_list.rds")
+```
+  
+```{r}
+as.data.frame(predict(model_list, newdata=head(train)))
+```
+  
+```{r}
+modelCor(resamples(model_list))
+```
+
+```{r}
+ensemble = caretEnsemble(
+  model_list, 
+  metric="ROC",
+  trControl=control)
+
+summary(ensemble)
+
+```
+
+```{r}
+pred_ensemble = predict(ensemble, train, type = "raw")
+confusionMatrix(pred_ensemble,train$Arrest,  positive = "Yes")
+
+```
+
+```{r}
+pred_ensemble_test = predict(ensemble, test, type = "raw")
+confusionMatrix(pred_ensemble_test,test$Arrest, positive = "Yes")
+
+```
+  
+***
+  
+**Stacked**  
+  
+```{r}
+control2 = trainControl(
+  method = "cv",
+  number = 10,
+  savePredictions = "final",
+  classProbs = TRUE,
+  summaryFunction = twoClassSummary,
+  index=createResample(train$Arrest))
+
+stack = caretStack(
+  model_list,
+  method ="glm",
+  metric ="ROC",
+  trControl = control2)
+
+```
+
+```{r}
+print(stack)
+summary(stack)
+
+```
+
+```{r}
+pred_stack = predict(stack, train, type = "raw")
+confusionMatrix(pred_stack,train$Arrest, positive = "Yes")
+
+```
+
+```{r}
+pred_stack_test = predict(stack, test, type = "raw")
+confusionMatrix(pred_stack_test,test$Arrest, positive = "Yes")
+
+```
+  
+***
+  
+**XgBoost**  
+  
+```{r}
+train_dummy = dummyVars(" ~ .", data = train)
+train_xgb = data.frame(predict(train_dummy, newdata = train))
+#str(train_xgb)
+
+test_dummy = dummyVars(" ~ .", data = test)
+test_xgb = data.frame(predict(test_dummy, newdata = test))
+
+train_xgb = train_xgb %>% dplyr::select(-Arrest.No) 
+test_xgb = test_xgb %>% dplyr::select(-Arrest.No)
+
+#str(train_xgb)
+#str(test_xgb)
+
+```
+  
+```{r}
+# set.seed(1234)
+# ctrl = trainControl(method = "cv",number = 5)
+#  
+# tgrid = expand.grid(
+#    nrounds = 100,
+#    max_depth = c(1,2,3,4),
+#    eta = c(0.01, 0.1, 0.2, 0.3),
+#    gamma = 0,
+#    colsample_bytree = c(0.6, 0.8, 1),
+#    min_child_weight = 1,
+#    subsample = c(0.8, 1))
+#  
+# fitxgb = train(as.factor(Arrest.Yes)~.,
+#                  data = train_xgb,
+#                  method="xgbTree",
+#                  tuneGrid = tgrid,
+#                  trControl=ctrl)
+```
+
+```{r}
+# saveRDS(fitxgb,"fitxgb.rds")
+# rm(fitxgb)
+
+```
+
+```{r}
+fitxgb = readRDS("fitxgb.rds")
+
+#fitxgb
+plot(fitxgb)
+
+```
+
+```{r}
+predxgbtrain = predict(fitxgb, train_xgb)
+confusionMatrix(as.factor(train_xgb$Arrest.Yes), predxgbtrain,positive="1")
+
+```
+
+```{r}
+predxgbtest = predict(fitxgb, test_xgb)
+confusionMatrix(as.factor(test_xgb$Arrest.Yes), predxgbtest,positive="1")
+
+```
+  
+***  
+  
+**Comparing Models**
+```{r, message=FALSE}
+ModelComparisons2 <- read_csv("ModelComparisons2.csv")
+```
+
+```{r}
+ModelComparisons2=ModelComparisons2 %>% drop_na()
+
+ModelComparisons2 = ModelComparisons2 %>%
+  mutate(`Model Type`=as.factor(`Model Type`))%>%
+  mutate(`Data Type`=as.factor(`Data Type`))
+
+#ModelComparisons2
+
+```
+
+```{r, fig1, fig.height = 5, fig.width = 8}
+tt3 <- ttheme_minimal(
+   core = list(fg_params=list(hjust = 1, x=1),
+            bg_params=list(fill=c("lightblue", "pink"))),
+  colhead=list(fg_params=list(col="navyblue", fontface=4L)),
+  rowhead=list(fg_params=list(col="navyblue", fontface=3L)))
+
+grid.arrange(
+  tableGrob(ModelComparisons2[1:5], theme=tt3),
+  nrow=1)
+
+p1=ggplot(ModelComparisons2,aes(x=`Model Type`,y=Accuracy,color=`Data Type`))+
+  geom_point(size=2)+
+  ggtitle("Model Accuracy - Training vs. Testing")+
+  theme(axis.title.y = element_blank(),
+        axis.text.x = element_text(size=12,angle = 45, hjust = 1),
+        axis.title.x = element_text(size = 14, face = "bold"),
+        axis.text.y = element_text(size=12, face= "bold"),
+        plot.title=element_text( size=14, hjust=.5, vjust=2, face='bold'),
+        legend.position = "top")
+p1
+```
+
+
+```{r, message=FALSE}
+ModelComparisons <- read_csv("ModelComparisons.csv")
+```
+
+```{r}
+ModelComparisons1=ModelComparisons %>% drop_na()
+
+ModelComparisons1 = ModelComparisons1 %>%
+  mutate(`Model Type`=as.factor(`Model Type`))
+
+#ModelComparisons1
+
+```
+  
+**Accuracy**  
+  
+```{r, fig2, fig.height = 5, fig.width = 8}
+p2=ggplot(ModelComparisons1,aes(x=`Model Type`,y=Accuracy))+  
+  geom_bar(position = 'dodge',stat = "identity",aes(fill = `Model Type`))+
+  geom_label(aes(label=Accuracy))+
+  geom_line(aes(y = `Naive Model`), size = 2, color="red", group = 1)+
+  ggtitle("Model Performance During Testing")+
+  theme(axis.title.y = element_blank(),
+        axis.text.x = element_blank(),
+        axis.title.x = element_text(size = 14, face = "bold"),
+        axis.text.y = element_text(size=12, face= "bold"),
+        plot.title=element_text( size=14, hjust=.5, vjust=2, face='bold'),
+        legend.position = "none")+
+  annotate('text',x=4.5,y=4.1,label="Naive Model",color="red",size=4,angle=90)+
+  annotate('text',x=4.5,y=4.3,label="=80%",color="red",size=4,angle=90)+
+  coord_flip()
+p2
+```
+
+**Specificity**  
+  
+```{r, fig3, fig.height = 5, fig.width = 8}
+p3=ggplot(ModelComparisons1,aes(x=`Model Type`,y=Specificity))+
+  geom_bar(position = 'dodge',stat = "identity",aes(fill = `Model Type`))+
+  geom_label(aes(label=Specificity))+
+  ggtitle("Model Performance During Testing")+
+  theme(axis.title.y = element_blank(),
+        axis.text.x = element_blank(),
+        axis.title.x = element_text(size = 14, face = "bold"),
+        axis.text.y = element_text(size=12, face= "bold"),
+        plot.title=element_text( size=14, hjust=.5, vjust=2, face='bold'),
+        legend.position = "none")+
+  coord_flip()
+p3
+```
+  
+**Sensitivity**
+  
+```{r, fig4, fig.height = 5, fig.width = 8}
+p4=ggplot(ModelComparisons1,aes(x=`Model Type`,y=Sensitivity))+
+  geom_bar(position = 'dodge',stat = "identity",aes(fill = `Model Type`))+
+  geom_label(aes(label=Sensitivity))+
+  ggtitle("Model Performance During Testing")+
+  theme(axis.title.y = element_blank(),
+        axis.text.x = element_blank(),
+        axis.title.x = element_text(size = 14, face = "bold"),
+        axis.text.y = element_text(size=12, face= "bold"),
+        plot.title=element_text( size=14, hjust=.5, vjust=2, face='bold'),
+        legend.position = "none")+
+  coord_flip()
+p4
+```
