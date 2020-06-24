@@ -1,0 +1,139 @@
+---
+title: "2018 Chicago Crime Statistics Analysis Project"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+    runtime: shiny
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(tidyverse)
+library(shiny)
+library(shinydashboard)
+library(lubridate)
+library(VIM)
+library(gridExtra)
+library(GGally)
+library(MASS)
+library(car)
+library(ranger)
+library(mice)
+library(caret)
+library(forcats)
+library(foreign)
+
+chicago <- read_csv("chicago.csv")
+chicago2=chicago  %>%
+  dplyr::select(-c("ID", "Block", "Description", "IUCR","Case Number","Updated On", "X Coordinate","Y Coordinate","Location", "FBI Code","Year","X1", "Beat", "Ward", "Community Area")) %>%
+  mutate(Date = mdy_hm(Date)) %>%
+  mutate(Hour = hour(Date)) %>%
+  mutate(DayofWeek = wday(Date)) %>%
+  mutate(Hour=as.factor(Hour))
+chicago2$`Primary Type`=as.factor(chicago2$`Primary Type`)
+chicago2$District=as.factor(chicago2$District)
+chicago2 = chicago2 %>% mutate(Arrest = as.factor(Arrest)) %>% 
+  mutate(Arrest = fct_recode(Arrest, "No" = "FALSE", "Yes" = "TRUE" ))
+chicago2 = chicago2 %>% mutate(Domestic = as.factor(Domestic)) %>% 
+  mutate(Domestic = fct_recode(Domestic, "No" = "FALSE", "Yes" = "TRUE" ))
+chicago2 = chicago2 %>% mutate(DayofWeek= as.factor(DayofWeek)) %>% 
+  mutate(DayofWeek = fct_recode(DayofWeek, "Sunday" = "1", "Monday" = "2", "Tuesday"="3", "Wednesday"="4", "Thursday"="5", "Friday"="6", "Saturday"="7" ))
+chicago2=chicago2 %>%
+  dplyr::select(-c("Latitude","Longitude","Date")) %>%
+  drop_na()
+chicago2$`Location Description` = fct_collapse(chicago2$`Location Description`, 
+      "Airport" = c("AIRCRAFT","AIRPORT BUILDING NON-TERMINAL - NON-SECURE AREA","AIRPORT BUILDING NON-TERMINAL - SECURE AREA","AIRPORT EXTERIOR - NON-SECURE AREA","AIRPORT EXTERIOR - SECURE AREA","AIRPORT PARKING LOT","AIRPORT TERMINAL LOWER LEVEL - NON-SECURE AREA","AIRPORT TERMINAL LOWER LEVEL - SECURE AREA","AIRPORT TERMINAL UPPER LEVEL - NON-SECURE AREA","AIRPORT TERMINAL UPPER LEVEL - SECURE AREA","AIRPORT TRANSPORTATION SYSTEM (ATS)","AIRPORT VENDING ESTABLISHMENT"), 
+      "Business/Retail/Resturant"=c("APPLIANCE STORE","ATHLETIC CLUB","AUTO / BOAT / RV DEALERSHIP","BAR OR TAVERN","BARBERSHOP","BOWLING ALLEY","CAR WASH","CLEANING STORE","COMMERCIAL / BUSINESS OFFICE","CONVENIENCE STORE","DEPARTMENT STORE","DRUG STORE","GAS STATION","GROCERY FOOD STORE","MOVIE HOUSE/THEATER","PAWN SHOP","RESTAURANT","SMALL RETAIL STORE","TAVERN/LIQUOR STORE","FACTORY/MANUFACTURING BUILDING","WAREHOUSE","ATM (AUTOMATIC TELLER MACHINE)","BANK","CURRENCY EXCHANGE","SAVINGS AND LOAN","HOTEL","HOTEL/MOTEL"), 
+      "Government Building/Land"=c("FEDERAL BUILDING","FIRE STATION","GOVERNMENT BUILDING","GOVERNMENT BUILDING/PROPERTY","LIBRARY","FOREST PRESERVE","LAKEFRONT/WATERFRONT/RIVERBANK","PARK PROPERTY","JAIL / LOCK-UP FACILITY","POLICE FACILITY/VEH PARKING LOT"), 
+      "Medical/Hospital"=c("ANIMAL HOSPITAL","HOSPITAL BUILDING/GROUNDS","MEDICAL/DENTAL OFFICE","NURSING HOME/RETIREMENT HOME"),
+      "Other"=c("CEMETARY","CONSTRUCTION SITE","OTHER","POOL ROOM","SPORTS ARENA/STADIUM","ABANDONED BUILDING","VACANT LOT", "VACANT LOT/LAND","CHURCH/SYNAGOGUE/PLACE OF WORSHIP"),
+      "Public Transportation"=c("CTA BUS","CTA BUS STOP","CTA GARAGE / OTHER PROPERTY","CTA PLATFORM","CTA STATION","CTA TRAIN","OTHER COMMERCIAL TRANSPORTATION","OTHER RAILROAD PROP / TRAIN DEPOT"),
+      "Residential"=c("APARTMENT","CHA APARTMENT","CHA HALLWAY/STAIRWELL/ELEVATOR","CHA PARKING LOT/GROUNDS","DRIVEWAY - RESIDENTIAL","HALLWAY","HOUSE","PORCH","RESIDENCE","RESIDENCE PORCH/HALLWAY","RESIDENCE-GARAGE","RESIDENTIAL YARD (FRONT/BACK)","YARD"),
+      "School/College"=c("COLLEGE/UNIVERSITY GROUNDS","COLLEGE/UNIVERSITY RESIDENCE HALL","DAY CARE CENTER","SCHOOL, PRIVATE, BUILDING","SCHOOL, PRIVATE, GROUNDS","SCHOOL, PUBLIC, BUILDING","SCHOOL, PUBLIC, GROUNDS"),
+      "Street"=c("ALLEY","BRIDGE","HIGHWAY/EXPRESSWAY","PARKING LOT","PARKING LOT/GARAGE(NON.RESID.)","SIDEWALK","STREET"),
+      "Vehicle/Boat"=c("TAXICAB","VEHICLE - DELIVERY TRUCK","VEHICLE - OTHER RIDE SHARE SERVICE (E.G., UBER, LYFT)","VEHICLE NON-COMMERCIAL","VEHICLE-COMMERCIAL","VEHICLE-COMMERCIAL - ENTERTAINMENT/PARTY BUS","AUTO","BOAT/WATERCRAFT"))
+chicago2$`Primary Type` = fct_collapse(chicago2$`Primary Type`,
+      "Assault"="ASSAULT",
+      "Battery"="BATTERY",
+      "Burglary"="BURGLARY",
+      "Damage"="CRIMINAL DAMAGE",
+      "Disturbing the Peace"=c("PUBLIC PEACE VIOLATION","INTERFERENCE WITH PUBLIC OFFICER","OBSCENITY","INTIMIDATION"),
+      "Drugs/Alcohol"=c("NARCOTICS","LIQUOR LAW VIOLATION"),
+      "Fraud"="DECEPTIVE PRACTICE",
+      "Homicide"="HOMICIDE",
+      "Other"=c("KIDNAPPING","OTHER OFFENSE","ARSON","STALKING","OFFENSE INVOLVING CHILDREN","GAMBLING","NON-CRIMINAL"),
+      "Robbery"="ROBBERY",
+      "Sexual"=c("SEX OFFENSE","CRIM SEXUAL ASSAULT","PROSTITUTION","PUBLIC INDECENCY"),
+      "Theft"="THEFT",
+      "Auto Theft"="MOTOR VEHICLE THEFT",
+      "Trespass"="CRIMINAL TRESPASS",
+      "Weapons"=c("WEAPONS VIOLATION","CONCEALED CARRY LICENSE VIOLATION"))
+```
+
+  
+
+Row
+-----------------------------------------------------------------------
+**About the Data**
+  
+The dataset for this project comes from the City of Chicago’s Data Portal and contains information about crime in Chicago during 2018. A sampling of 15,000 rows was taken from the original 267,000+ rows with the objective to develop a predictive model for arrests. Phase I of the project consisted of reviewing and cleaning the data, then isolating variables that may affect the arrest rate.  
+  
+The isolated variables were broken into 3 categories:  
+  
+Crime - Type and Domestic  
+Time - Hour  
+Location - District and Description  
+  
+  
+**Click on the tabs to the right to review the variable graphs.** 
+
+  
+### Arrests
+
+```{r}
+ggplot(chicago2, aes(x=factor(1), fill=Arrest))+
+  geom_bar(width = 1)+
+  coord_polar("y")+
+  theme(
+  axis.title.x = element_blank(),
+  axis.title.y = element_blank(),
+  panel.border = element_blank(),
+  panel.grid=element_blank(),
+  axis.ticks = element_blank(),
+  plot.title=element_text(size=14, face="bold")
+  )
+
+```
+
+Row {.tabset .tabset-fade}
+-----------------------------------------------------------------------
+
+### By Crime Type
+
+```{r}
+ggplot(chicago2,aes(x=`Primary Type`, fill = Arrest)) + geom_bar()+ theme(axis.text.x = element_text(angle=90, hjust=1))
+```
+
+### By Domestic
+```{r}
+ggplot(chicago2,aes(x=Domestic, fill = Arrest)) + geom_bar()
+```
+
+### By Hour
+
+```{r}
+ggplot(chicago2,aes(x=Hour, fill = Arrest)) + geom_bar()
+```
+
+### By Location
+
+```{r}
+ggplot(chicago2,aes(x=`Location Description`, fill = Arrest)) + geom_bar() + theme(axis.text.x = element_text(angle=90, hjust=1))
+```
+
+### By District
+```{r}
+ggplot(chicago2,aes(x=District, fill = Arrest)) + geom_bar()
+```
+
